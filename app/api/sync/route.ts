@@ -25,5 +25,6 @@ export async function POST(req: NextRequest) {
 
 export async function GET() {
   const lastSync = getSetting('last_sync')
-  return NextResponse.json({ lastSync })
+  const hasKey = !!process.env.FOOTBALL_API_KEY
+  return NextResponse.json({ lastSync, hasKey })
 }
