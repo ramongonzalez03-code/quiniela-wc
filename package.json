@@ -15,6 +15,9 @@
     "better-sqlite3": "^9.4.3",
     "bcryptjs": "^2.4.3"
   },
+  "engines": {
+    "node": "20.x"
+  },
   "devDependencies": {
     "typescript": "^5",
     "@types/node": "^20",
