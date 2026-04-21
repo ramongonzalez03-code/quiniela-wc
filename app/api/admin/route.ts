@@ -51,11 +51,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, locked: !locked })
   }
 
-  if (action === 'set_bracket_result') {
-    const { round, teams } = data
-    db.prepare(
-      'INSERT OR REPLACE INTO bracket_picks (user_id, round, teams) VALUES (-1, ?, ?)'
-    ).run(round, JSON.stringify(teams))
+  if (action === 'create_knockout_match') {
+    const { phase, team1, team2, date, time, venue } = data
+    const result = db.prepare(
+      'INSERT INTO matches (phase, group_name, team1, team2, date, time, venue) VALUES (?, NULL, ?, ?, ?, ?, ?)'
+    ).run(phase, team1, team2, date || '2026-07-01', time || '18:00', venue || '')
+    return NextResponse.json({ ok: true, id: result.lastInsertRowid })
+  }
+
+  if (action === 'delete_knockout_match') {
+    const { match_id } = data
+    db.prepare('DELETE FROM predictions WHERE match_id = ?').run(match_id)
+    db.prepare('DELETE FROM matches WHERE id = ? AND phase != ?').run(match_id, 'group')
     return NextResponse.json({ ok: true })
   }
 
