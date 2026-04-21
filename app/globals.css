@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #061a0e;
+  --field: #0a3d1f;
+  --gold: #f5c518;
+}
+
+body {
+  background-color: var(--bg);
+  color: #f1f5f1;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+@layer components {
+  .btn-gold {
+    @apply bg-gold text-field-dark font-bold px-6 py-3 rounded-lg hover:bg-gold-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-outline {
+    @apply border border-gold text-gold font-semibold px-4 py-2 rounded-lg hover:bg-gold hover:text-field-dark transition-colors;
+  }
+  .card {
+    @apply bg-field rounded-xl border border-field-light p-4;
+  }
+  .tab-active {
+    @apply bg-gold text-field-dark font-bold;
+  }
+  .tab-inactive {
+    @apply text-gray-400 hover:text-white hover:bg-field-mid;
+  }
+  .score-input {
+    @apply w-14 text-center bg-field-dark border border-field-light rounded-lg py-2 text-xl font-bold text-white focus:border-gold focus:outline-none;
+  }
+}
