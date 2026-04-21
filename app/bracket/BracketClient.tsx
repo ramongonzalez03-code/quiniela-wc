@@ -4,207 +4,320 @@ import NavBar from '@/components/NavBar'
 import { getTeam } from '@/lib/wc2026-data'
 
 interface KoMatch { id: number; phase: string; team1: string; team2: string; date: string; score1: number | null; score2: number | null; status: string }
-interface Round { id: string; name: string; pts: number }
-interface GroupStanding { group: { id: string; name: string }; standings: Array<{ id: string; pts: number }> }
+interface GroupStanding { id: string; pts: number; gf: number; ga: number; played: number }
+interface GroupData { group: { id: string; name: string }; standings: GroupStanding[]; matchesPlayed: number }
 
-interface Props {
+const PHASES = [
+  { id: 'r32', name: 'Octavos', short: 'R32', pts: 4 },
+  { id: 'r16', name: 'Cuartos', short: 'R16', pts: 5 },
+  { id: 'qf', name: 'Semis', short: 'SF', pts: 6 },
+  { id: 'sf', name: 'Final + 3°', short: 'F', pts: 7 },
+  { id: 'final', name: 'Gran Final', short: '🏆', pts: 10 },
+]
+
+function MatchCard({ match, pred, onPick, locked }: {
+  match: KoMatch
+  pred?: { s1: number; s2: number }
+  onPick?: (winner: 'team1' | 'team2') => void
+  locked?: boolean
+}) {
+  const t1 = getTeam(match.team1)
+  const t2 = getTeam(match.team2)
+  const finished = match.status === 'finished'
+  const realWinner = finished && match.score1 !== null && match.score2 !== null
+    ? match.score1 > match.score2 ? 'team1' : 'team2' : null
+  const predWinner = pred ? (pred.s1 > pred.s2 ? 'team1' : pred.s1 < pred.s2 ? 'team2' : null) : null
+  const correct = finished && realWinner && predWinner === realWinner
+  const wrong = finished && realWinner && predWinner && predWinner !== realWinner
+
+  return (
+    <div className={`rounded-lg border-2 overflow-hidden text-xs font-semibold ${
+      correct ? 'border-green-500' : wrong ? 'border-red-700' : predWinner ? 'border-gold/60' : 'border-field-light'
+    }`}>
+      {/* Team 1 */}
+      <button
+        onClick={() => !locked && !finished && onPick?.('team1')}
+        disabled={locked || finished}
+        className={`w-full flex items-center gap-1.5 px-2 py-2 transition-colors ${
+          realWinner === 'team1' ? 'bg-green-800/40 text-white' :
+          predWinner === 'team1' && !finished ? 'bg-gold/15 text-white' :
+          'bg-field-dark text-gray-300 hover:bg-field-mid'
+        } ${locked || finished ? 'cursor-default' : 'cursor-pointer'}`}
+      >
+        <span className="text-base leading-none">{t1.flag}</span>
+        <span className="flex-1 text-left truncate">{t1.name}</span>
+        {finished && <span className="font-black text-white">{match.score1}</span>}
+        {predWinner === 'team1' && !finished && <span className="text-gold">⭐</span>}
+        {realWinner === 'team1' && <span className="text-green-400 text-xs">✓</span>}
+      </button>
+
+      <div className="h-px bg-field-light" />
+
+      {/* Team 2 */}
+      <button
+        onClick={() => !locked && !finished && onPick?.('team2')}
+        disabled={locked || finished}
+        className={`w-full flex items-center gap-1.5 px-2 py-2 transition-colors ${
+          realWinner === 'team2' ? 'bg-green-800/40 text-white' :
+          predWinner === 'team2' && !finished ? 'bg-gold/15 text-white' :
+          'bg-field-dark text-gray-300 hover:bg-field-mid'
+        } ${locked || finished ? 'cursor-default' : 'cursor-pointer'}`}
+      >
+        <span className="text-base leading-none">{t2.flag}</span>
+        <span className="flex-1 text-left truncate">{t2.name}</span>
+        {finished && <span className="font-black text-white">{match.score2}</span>}
+        {predWinner === 'team2' && !finished && <span className="text-gold">⭐</span>}
+        {realWinner === 'team2' && <span className="text-green-400 text-xs">✓</span>}
+      </button>
+    </div>
+  )
+}
+
+function EmptySlot() {
+  return (
+    <div className="rounded-lg border-2 border-dashed border-field-light overflow-hidden text-xs opacity-40">
+      <div className="flex items-center gap-1.5 px-2 py-2 bg-field-dark text-gray-500">
+        <span>🏳️</span><span>Por definir</span>
+      </div>
+      <div className="h-px bg-field-light" />
+      <div className="flex items-center gap-1.5 px-2 py-2 bg-field-dark text-gray-500">
+        <span>🏳️</span><span>Por definir</span>
+      </div>
+    </div>
+  )
+}
+
+export default function BracketClient({ userName, koMatches, initialPreds, groupStandings }: {
   userName: string
   koMatches: KoMatch[]
   initialPreds: Record<number, { s1: number; s2: number }>
-  rounds: Round[]
-  groupStandings: GroupStanding[]
-  locked: boolean
-}
-
-export default function BracketClient({ userName, koMatches, initialPreds, rounds, groupStandings, locked }: Props) {
+  groupStandings: GroupData[]
+}) {
+  const [tab, setTab] = useState<'bracket' | 'groups'>('bracket')
   const [preds, setPreds] = useState(initialPreds)
   const [saving, setSaving] = useState<number | null>(null)
-  const [saved, setSaved] = useState<number | null>(null)
-  const [tab, setTab] = useState<'knockout' | 'groups'>('knockout')
 
-  async function savePred(matchId: number, s1: number, s2: number) {
-    setSaving(matchId)
+  async function pickWinner(match: KoMatch, winner: 'team1' | 'team2') {
+    const cur = preds[match.id]
+    const s1 = winner === 'team1' ? Math.max((cur?.s2 ?? 0) + 1, 1) : 0
+    const s2 = winner === 'team2' ? Math.max((cur?.s1 ?? 0) + 1, 1) : 0
+    const newPred = winner === 'team1' ? { s1, s2: 0 } : { s1: 0, s2 }
+    setPreds(p => ({ ...p, [match.id]: newPred }))
+    setSaving(match.id)
     await fetch('/api/predictions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'match', data: { match_id: matchId, s1, s2 } }),
+      body: JSON.stringify({ type: 'match', data: { match_id: match.id, s1: newPred.s1, s2: newPred.s2 } }),
     })
     setSaving(null)
-    setSaved(matchId)
-    setTimeout(() => setSaved(null), 2000)
   }
 
-  function pickWinner(match: KoMatch, winner: 'team1' | 'team2') {
-    if (locked || match.status === 'finished') return
-    const cur = preds[match.id]
-    let s1 = cur?.s1 ?? 1
-    let s2 = cur?.s2 ?? 0
-    if (winner === 'team1') { if (s1 <= s2) { s1 = (s2 ?? 0) + 1 } }
-    else { if (s2 <= s1) { s2 = (s1 ?? 0) + 1 } }
-    const newPred = { s1, s2 }
-    setPreds(p => ({ ...p, [match.id]: newPred }))
-    savePred(match.id, newPred.s1, newPred.s2)
-  }
+  const byPhase = (phase: string) => koMatches.filter(m => m.phase === phase)
 
-  const roundsWithMatches = rounds.filter(r => koMatches.some(m => m.phase === r.id))
+  // Build bracket columns: r32(16), r16(8), qf(4), sf(2), final(1)
+  // Left half: first 8 r32 → first 4 r16 → first 2 qf → first sf
+  // Right half: next 8 r32 → next 4 r16 → next 2 qf → second sf
+  // Center: final
+  const r32 = byPhase('r32')
+  const r16 = byPhase('r16')
+  const qf = byPhase('qf')
+  const sf = byPhase('sf')
+  const final = byPhase('final')
+  const third = byPhase('3rd')
+
+  const hasAnyKoMatch = koMatches.length > 0
 
   return (
     <div className="min-h-screen">
       <NavBar userName={userName} />
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-black text-white mb-6">Bracket</h1>
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        <h1 className="text-2xl font-black text-white mb-4">Bracket</h1>
 
-        <div className="flex gap-2 mb-6 bg-field-dark rounded-xl p-1">
-          <button onClick={() => setTab('knockout')}
-            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${tab === 'knockout' ? 'tab-active' : 'tab-inactive'}`}>
+        <div className="flex gap-2 mb-6 bg-field-dark rounded-xl p-1 max-w-sm">
+          <button onClick={() => setTab('bracket')}
+            className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${tab === 'bracket' ? 'tab-active' : 'tab-inactive'}`}>
             🏆 Eliminatoria
           </button>
           <button onClick={() => setTab('groups')}
             className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${tab === 'groups' ? 'tab-active' : 'tab-inactive'}`}>
-            📊 Posiciones de Grupo
+            📊 Grupos
           </button>
         </div>
 
-        {tab === 'knockout' && (
+        {/* BRACKET VIEW */}
+        {tab === 'bracket' && (
           <>
-            {roundsWithMatches.length === 0 ? (
-              <div className="card text-center py-12">
-                <div className="text-5xl mb-3">⏳</div>
-                <p className="text-white font-bold text-lg">La eliminatoria aún no ha comenzado</p>
-                <p className="text-gray-400 text-sm mt-2">Los cruces aparecerán aquí cuando el Admin los agregue</p>
+            {!hasAnyKoMatch ? (
+              <div className="card text-center py-16">
+                <div className="text-6xl mb-4">⏳</div>
+                <p className="text-white font-bold text-xl">La eliminatoria aún no comienza</p>
+                <p className="text-gray-400 mt-2">Los cruces aparecerán aquí cuando el Admin los agregue</p>
+                <p className="text-gray-500 text-sm mt-1">Inicia el 4 de julio de 2026</p>
               </div>
             ) : (
-              <div className="space-y-8">
-                {roundsWithMatches.map(round => {
-                  const matches = koMatches.filter(m => m.phase === round.id)
-                  return (
-                    <div key={round.id}>
-                      <div className="flex items-center gap-3 mb-3">
-                        <h2 className="text-lg font-black text-gold">{round.name}</h2>
-                        <span className="bg-gold/20 text-gold text-xs font-bold px-2 py-0.5 rounded-full">
-                          {round.pts} pts por acierto
-                        </span>
+              <div className="overflow-x-auto pb-4">
+                <div className="min-w-[700px]">
+                  {/* Round headers */}
+                  <div className="grid grid-cols-5 gap-2 mb-3 text-center">
+                    {['Octavos', 'Cuartos', 'Semis', '', 'Final'].map((label, i) => (
+                      <div key={i} className={`text-xs font-bold py-1 rounded ${label ? 'bg-field border border-field-light text-gold' : ''}`}>
+                        {label}
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {matches.map(match => {
-                          const t1 = getTeam(match.team1)
-                          const t2 = getTeam(match.team2)
-                          const pred = preds[match.id]
-                          const predWinner = pred ? (pred.s1 > pred.s2 ? 'team1' : pred.s1 < pred.s2 ? 'team2' : null) : null
-                          const finished = match.status === 'finished'
-                          const realWinner = finished && match.score1 !== null && match.score2 !== null
-                            ? (match.score1 > match.score2 ? 'team1' : 'team2')
-                            : null
-                          const correct = finished && realWinner && predWinner === realWinner
+                    ))}
+                  </div>
 
-                          return (
-                            <div key={match.id} className={`card border-2 ${correct ? 'border-green-500' : finished && predWinner && predWinner !== realWinner ? 'border-red-800' : 'border-field-light'}`}>
-                              {/* Result badge */}
-                              {finished && (
-                                <div className="flex justify-center mb-2">
-                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${correct ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'}`}>
-                                    {correct ? '✅ Acertaste' : '❌ Fallaste'} · {match.score1}-{match.score2}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* Teams */}
-                              <div className="space-y-2">
-                                {/* Team 1 */}
-                                <button
-                                  disabled={locked || finished}
-                                  onClick={() => pickWinner(match, 'team1')}
-                                  className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                                    predWinner === 'team1'
-                                      ? 'border-gold bg-gold/10 text-white'
-                                      : 'border-field-light bg-field-dark text-gray-300 hover:border-gold/50'
-                                  } ${finished ? 'cursor-default' : 'cursor-pointer'}`}
-                                >
-                                  <span className="text-2xl">{t1.flag}</span>
-                                  <span className="font-bold flex-1 text-left">{t1.name}</span>
-                                  {predWinner === 'team1' && <span className="text-gold text-xs font-bold">Tu pick ⭐</span>}
-                                  {finished && realWinner === 'team1' && <span className="text-green-400 text-xs font-bold">Ganó ✓</span>}
-                                </button>
-
-                                <div className="text-center text-gray-500 text-xs font-bold">VS</div>
-
-                                {/* Team 2 */}
-                                <button
-                                  disabled={locked || finished}
-                                  onClick={() => pickWinner(match, 'team2')}
-                                  className={`w-full flex items-center gap-3 p-3 rounded-lg border-2 transition-all ${
-                                    predWinner === 'team2'
-                                      ? 'border-gold bg-gold/10 text-white'
-                                      : 'border-field-light bg-field-dark text-gray-300 hover:border-gold/50'
-                                  } ${finished ? 'cursor-default' : 'cursor-pointer'}`}
-                                >
-                                  <span className="text-2xl">{t2.flag}</span>
-                                  <span className="font-bold flex-1 text-left">{t2.name}</span>
-                                  {predWinner === 'team2' && <span className="text-gold text-xs font-bold">Tu pick ⭐</span>}
-                                  {finished && realWinner === 'team2' && <span className="text-green-400 text-xs font-bold">Ganó ✓</span>}
-                                </button>
-                              </div>
-
-                              {/* Score prediction (bonus) */}
-                              {predWinner && !finished && (
-                                <div className="mt-3 pt-3 border-t border-field-light">
-                                  <p className="text-xs text-gray-500 mb-2 text-center">Marcador exacto (+{2} pts bonus)</p>
-                                  <div className="flex items-center justify-center gap-2">
-                                    <input type="number" min="0" max="20"
-                                      value={pred?.s1 ?? ''}
-                                      onChange={e => setPreds(p => ({ ...p, [match.id]: { ...p[match.id], s1: Number(e.target.value) } }))}
-                                      onBlur={() => pred && savePred(match.id, pred.s1, pred.s2)}
-                                      className="score-input w-12"
-                                    />
-                                    <span className="text-gray-500">-</span>
-                                    <input type="number" min="0" max="20"
-                                      value={pred?.s2 ?? ''}
-                                      onChange={e => setPreds(p => ({ ...p, [match.id]: { ...p[match.id], s2: Number(e.target.value) } }))}
-                                      onBlur={() => pred && savePred(match.id, pred.s1, pred.s2)}
-                                      className="score-input w-12"
-                                    />
-                                  </div>
-                                </div>
-                              )}
-
-                              <div className="text-right text-xs text-gray-600 mt-2">
-                                {saving === match.id ? '⏳' : saved === match.id ? '✅' : ''}
-                              </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )
-                })}
+                  {/* Bracket grid — left half: cols 1-3, center: col 4, right half mirrored on col 5 */}
+                  {/* We show up to 8 R32 matches per side for a full 16-match bracket */}
+                  <BracketHalf
+                    r32={r32.slice(0, 8)}
+                    r16={r16.slice(0, 4)}
+                    qf={qf.slice(0, 2)}
+                    sf={sf.slice(0, 1)}
+                    final={final}
+                    third={third}
+                    preds={preds}
+                    onPick={pickWinner}
+                    saving={saving}
+                  />
+                </div>
               </div>
             )}
           </>
         )}
 
+        {/* GROUPS VIEW */}
         {tab === 'groups' && (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {groupStandings.map(({ group, standings }) => (
+            {groupStandings.map(({ group, standings, matchesPlayed }) => (
               <div key={group.id} className="card">
-                <h3 className="font-bold text-gold text-sm mb-2">{group.name}</h3>
-                <ol className="space-y-1">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-bold text-gold text-sm">{group.name}</h3>
+                  <span className="text-xs text-gray-500">{matchesPlayed}/6 partidos</span>
+                </div>
+                <div className="space-y-1.5">
                   {standings.map((t, i) => {
                     const team = getTeam(t.id)
+                    const advances = i < 2
+                    const mightAdvance = i === 2
                     return (
-                      <li key={t.id} className={`flex items-center gap-2 text-sm ${i < 2 ? 'text-white' : i === 2 ? 'text-gray-400' : 'text-gray-600'}`}>
-                        <span className="w-4 text-xs text-gray-500">{i + 1}.</span>
+                      <div key={t.id} className={`flex items-center gap-2 text-xs rounded px-1.5 py-1 ${
+                        advances ? 'bg-green-900/30 text-white' :
+                        mightAdvance ? 'bg-yellow-900/20 text-gray-300' :
+                        'text-gray-500'
+                      }`}>
+                        <span className="w-3 text-gray-500 font-bold">{i + 1}</span>
                         <span>{team.flag}</span>
-                        <span className="truncate">{team.name}</span>
-                        <span className="ml-auto font-bold text-xs">{t.pts}p</span>
-                      </li>
+                        <span className="flex-1 truncate font-semibold">{team.name}</span>
+                        <span className="font-black text-gold">{t.pts}</span>
+                        <span className="text-gray-500 w-8 text-right">{t.gf}-{t.ga}</span>
+                      </div>
                     )
                   })}
-                </ol>
+                </div>
+                <div className="mt-2 flex gap-2 text-xs">
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-600 inline-block"></span>Clasifica</span>
+                  <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-600 inline-block"></span>Posible 3°</span>
+                </div>
               </div>
             ))}
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function BracketHalf({ r32, r16, qf, sf, final, third, preds, onPick, saving }: {
+  r32: KoMatch[]
+  r16: KoMatch[]
+  qf: KoMatch[]
+  sf: KoMatch[]
+  final: KoMatch[]
+  third: KoMatch[]
+  preds: Record<number, { s1: number; s2: number }>
+  onPick: (m: KoMatch, w: 'team1' | 'team2') => void
+  saving: number | null
+}) {
+  // Render matches per round — pairs are visually grouped with a bracket line
+  const maxR32 = Math.max(r32.length, 1)
+
+  return (
+    <div className="space-y-4">
+      {/* R32 + R16 + QF + SF + Final in a flex row */}
+      <div className="flex gap-2 items-start">
+        {/* R32 column */}
+        <div className="flex flex-col gap-2 flex-1 min-w-0">
+          <div className="text-center text-xs text-gray-500 mb-1">Octavos · 4pts</div>
+          {Array.from({ length: Math.max(r32.length, 8) }, (_, i) => (
+            <div key={i}>
+              {r32[i]
+                ? <MatchCard match={r32[i]} pred={preds[r32[i].id]} onPick={w => onPick(r32[i], w)} />
+                : r32.length > 0 ? <EmptySlot /> : null}
+              {/* Visual connector every 2 matches */}
+              {i % 2 === 1 && i < r32.length - 1 && <div className="h-2" />}
+            </div>
+          ))}
+        </div>
+
+        {/* R16 column */}
+        {r16.length > 0 && (
+          <div className="flex flex-col gap-2 flex-1 min-w-0" style={{ marginTop: '28px' }}>
+            <div className="text-center text-xs text-gray-500 mb-1">Cuartos · 5pts</div>
+            {r16.map((m, i) => (
+              <div key={m.id} style={{ marginBottom: i % 2 === 0 ? '8px' : '16px' }}>
+                <MatchCard match={m} pred={preds[m.id]} onPick={w => onPick(m, w)} />
+              </div>
+            ))}
+            {Array.from({ length: Math.max(0, 4 - r16.length) }, (_, i) => (
+              r32.length > 0 ? <div key={i} style={{ marginBottom: '24px' }}><EmptySlot /></div> : null
+            ))}
+          </div>
+        )}
+
+        {/* QF column */}
+        {qf.length > 0 && (
+          <div className="flex flex-col gap-2 flex-1 min-w-0" style={{ marginTop: '60px' }}>
+            <div className="text-center text-xs text-gray-500 mb-1">Semis · 6pts</div>
+            {qf.map((m, i) => (
+              <div key={m.id} style={{ marginBottom: i % 2 === 0 ? '8px' : '32px' }}>
+                <MatchCard match={m} pred={preds[m.id]} onPick={w => onPick(m, w)} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* SF column */}
+        {sf.length > 0 && (
+          <div className="flex flex-col gap-2 flex-1 min-w-0" style={{ marginTop: '120px' }}>
+            <div className="text-center text-xs text-gray-500 mb-1">Semifinal · 7pts</div>
+            {sf.map(m => (
+              <MatchCard key={m.id} match={m} pred={preds[m.id]} onPick={w => onPick(m, w)} />
+            ))}
+          </div>
+        )}
+
+        {/* Final column */}
+        {final.length > 0 && (
+          <div className="flex flex-col gap-2 flex-1 min-w-0" style={{ marginTop: '180px' }}>
+            <div className="text-center text-xs text-gold font-bold mb-1">🏆 Final · 10pts</div>
+            {final.map(m => (
+              <MatchCard key={m.id} match={m} pred={preds[m.id]} onPick={w => onPick(m, w)} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 3rd place match */}
+      {third.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs text-gray-500 font-bold mb-2">Tercer Lugar · 7pts</p>
+          <div className="max-w-48">
+            {third.map(m => (
+              <MatchCard key={m.id} match={m} pred={preds[m.id]} onPick={w => onPick(m, w)} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
