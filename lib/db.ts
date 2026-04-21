@@ -89,9 +89,16 @@ function initSchema(db: Database.Database) {
   seedAdminIfNeeded(db)
 }
 
+const DATA_VERSION = '3'
+
 function seedMatchesIfNeeded(db: Database.Database) {
-  const count = (db.prepare('SELECT COUNT(*) as c FROM matches').get() as { c: number }).c
-  if (count > 0) return
+  // Check data version — if outdated, wipe group matches and reseed
+  const version = (db.prepare("SELECT value FROM settings WHERE key = 'data_version'").get() as { value: string } | undefined)?.value
+  if (version === DATA_VERSION) return
+
+  db.prepare("DELETE FROM predictions WHERE match_id IN (SELECT id FROM matches WHERE phase = 'group')").run()
+  db.prepare("DELETE FROM group_picks").run()
+  db.prepare("DELETE FROM matches WHERE phase = 'group'").run()
 
   const insert = db.prepare(
     'INSERT INTO matches (phase, group_name, team1, team2, date, time, venue) VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -102,6 +109,7 @@ function seedMatchesIfNeeded(db: Database.Database) {
     }
   })
   insertMany()
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('data_version', ?)").run(DATA_VERSION)
 }
 
 function seedDefaultSettings(db: Database.Database) {
