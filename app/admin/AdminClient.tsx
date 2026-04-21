@@ -17,6 +17,24 @@ export default function AdminClient({ initialUsers, initialLocked, adminName }: 
   const [creating, setCreating] = useState(false)
   const [newCode, setNewCode] = useState<string | null>(null)
   const [toggling, setToggling] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{ updated: number; errors: string[] } | null>(null)
+  const [syncError, setSyncError] = useState<string | null>(null)
+
+  async function syncNow() {
+    setSyncing(true)
+    setSyncResult(null)
+    setSyncError(null)
+    const res = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+    const data = await res.json()
+    setSyncing(false)
+    if (!res.ok) setSyncError(data.error)
+    else setSyncResult({ updated: data.updated, errors: data.errors ?? [] })
+  }
 
   async function createCode() {
     if (!newName.trim()) return
@@ -85,6 +103,37 @@ export default function AdminClient({ initialUsers, initialLocked, adminName }: 
             className={`font-bold px-4 py-2 rounded-lg transition-colors ${locked ? 'bg-green-700 hover:bg-green-600 text-white' : 'bg-red-800 hover:bg-red-700 text-white'}`}>
             {locked ? 'Abrir predicciones' : 'Cerrar predicciones'}
           </button>
+        </div>
+
+        {/* Auto sync */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <h3 className="font-bold text-white">Sync Automático de Resultados</h3>
+              <p className="text-xs text-gray-400 mt-0.5">Jala resultados en vivo de football-data.org</p>
+            </div>
+            <button onClick={syncNow} disabled={syncing}
+              className="btn-gold text-sm py-2 px-4 flex items-center gap-2">
+              {syncing ? '⏳ Sincronizando...' : '🔄 Sincronizar ahora'}
+            </button>
+          </div>
+          {syncResult && (
+            <div className="mt-2 bg-green-900/30 border border-green-800/40 rounded-lg p-3 text-sm">
+              <p className="text-green-300 font-semibold">✅ {syncResult.updated} resultado(s) actualizados</p>
+              {syncResult.errors.length > 0 && (
+                <div className="mt-1 text-yellow-400 text-xs">
+                  ⚠️ No se encontraron: {syncResult.errors.join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+          {syncError && (
+            <div className="mt-2 bg-red-900/30 border border-red-800/40 rounded-lg p-3 text-sm text-red-300">
+              {syncError === 'FOOTBALL_API_KEY no configurada'
+                ? '⚠️ Falta agregar FOOTBALL_API_KEY en Render → Environment'
+                : `❌ ${syncError}`}
+            </div>
+          )}
         </div>
 
         {/* Quick links */}
