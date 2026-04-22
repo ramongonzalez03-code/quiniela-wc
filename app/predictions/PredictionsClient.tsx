@@ -40,25 +40,60 @@ function computeGroupStandings(groupTeams: string[], groupMatches: Match[], pred
 }
 
 // Official WC 2026 R32 bracket (Matches 73–88)
-// Slot codes: '1A'=1st Group A, '2B'=2nd Group B, '3rN'=Nth best 3rd-place
+// Slot codes: '1A'=1st Group A, '2B'=2nd Group B, '3_1A'=3rd assigned to 1A slot
 const R32_SLOTS: [string, string][] = [
-  ['2A', '2B'],  // Match 73
-  ['1E', '3r0'], // Match 74
-  ['1F', '2C'],  // Match 75
-  ['1C', '2F'],  // Match 76
-  ['1I', '3r1'], // Match 77
-  ['2E', '2I'],  // Match 78
-  ['1A', '3r2'], // Match 79
-  ['1L', '3r3'], // Match 80
-  ['1D', '3r4'], // Match 81
-  ['1G', '3r5'], // Match 82
-  ['2K', '2L'],  // Match 83
-  ['1H', '2J'],  // Match 84
-  ['1B', '3r6'], // Match 85
-  ['1J', '2H'],  // Match 86
-  ['1K', '3r7'], // Match 87
-  ['2D', '2G'],  // Match 88
+  ['2A', '2B'],   // Match 73 — fixed
+  ['1E', '3_1E'], // Match 74 — 1E vs assigned 3rd
+  ['1F', '2C'],   // Match 75 — fixed
+  ['1C', '2F'],   // Match 76 — fixed
+  ['1I', '3_1I'], // Match 77 — 1I vs assigned 3rd
+  ['2E', '2I'],   // Match 78 — fixed
+  ['1A', '3_1A'], // Match 79 — 1A vs assigned 3rd
+  ['1L', '3_1L'], // Match 80 — 1L vs assigned 3rd
+  ['1D', '3_1D'], // Match 81 — 1D vs assigned 3rd
+  ['1G', '3_1G'], // Match 82 — 1G vs assigned 3rd
+  ['2K', '2L'],   // Match 83 — fixed
+  ['1H', '2J'],   // Match 84 — fixed
+  ['1B', '3_1B'], // Match 85 — 1B vs assigned 3rd
+  ['1J', '2H'],   // Match 86 — fixed
+  ['1K', '3_1K'], // Match 87 — 1K vs assigned 3rd
+  ['2D', '2G'],   // Match 88 — fixed
 ]
+
+// Official allowed groups for each "1st vs 3rd" slot
+// A 3rd-place team can only face the 1st if it came from one of these groups
+const THIRD_SLOTS: { host: string; allowed: string[] }[] = [
+  { host: '1A', allowed: ['C','E','F','H','I'] },
+  { host: '1B', allowed: ['E','F','G','I','J'] },
+  { host: '1D', allowed: ['B','E','F','I','J'] },
+  { host: '1E', allowed: ['A','B','C','D','F'] },
+  { host: '1G', allowed: ['A','E','H','I','J'] },
+  { host: '1I', allowed: ['C','D','F','G','H'] },
+  { host: '1K', allowed: ['D','E','I','J','L'] },
+  { host: '1L', allowed: ['E','H','I','J','K'] },
+]
+
+// Bipartite matching: assign each of the 8 best thirds to exactly one host slot
+function assignThirds(thirds: { id: string; group: string }[]): Record<string, string | null> {
+  const result: Record<string, string | null> = {}
+  for (const s of THIRD_SLOTS) result[s.host] = null
+
+  function backtrack(thirdsLeft: { id: string; group: string }[], slotsLeft: typeof THIRD_SLOTS): boolean {
+    if (slotsLeft.length === 0) return true
+    const [slot, ...rest] = slotsLeft
+    for (let i = 0; i < thirdsLeft.length; i++) {
+      if (slot.allowed.includes(thirdsLeft[i].group)) {
+        result[slot.host] = thirdsLeft[i].id
+        if (backtrack(thirdsLeft.filter((_, j) => j !== i), rest)) return true
+        result[slot.host] = null
+      }
+    }
+    return false
+  }
+
+  backtrack(thirds, THIRD_SLOTS)
+  return result
+}
 
 const R32_LABELS = [
   '2°A vs 2°B', '1°E vs Mej.3°', '1°F vs 2°C', '1°C vs 2°F',
@@ -100,27 +135,29 @@ export default function PredictionsClient({ userName, locked, matches, groups, t
     return out
   }, [preds, groups, matches])
 
-  // Compute qualifiers (1st, 2nd, best 8 thirds) from predictions
+  // Compute qualifiers: 1st, 2nd per group + best 8 thirds with proper slot assignment
   const qualifiers = useMemo(() => {
     const first: Record<string, string | null> = {}
     const second: Record<string, string | null> = {}
-    const thirds: { id: string; pts: number; gd: number; gf: number }[] = []
+    const thirds: { id: string; pts: number; gd: number; gf: number; group: string }[] = []
     for (const g of groups) {
       const s = allStandings[g.id]
       first[g.id] = s[0]?.id ?? null
       second[g.id] = s[1]?.id ?? null
-      if (s[2]) thirds.push(s[2])
+      if (s[2]) thirds.push({ ...s[2], group: g.id })
     }
-    const bestThirds = [...thirds]
+    const best8 = [...thirds]
       .sort((a, b) => b.pts !== a.pts ? b.pts - a.pts : b.gd !== a.gd ? b.gd - a.gd : b.gf - a.gf)
-      .slice(0, 8).map(t => t.id)
-    return { first, second, bestThirds }
+      .slice(0, 8)
+    // Bipartite matching: assign each 3rd to the correct 1st-place slot
+    const thirdAssignment = assignThirds(best8.map(t => ({ id: t.id, group: t.group })))
+    return { first, second, thirdAssignment }
   }, [allStandings, groups])
 
   function resolveSlot(slot: string): string | null {
     if (slot[0] === '1') return qualifiers.first[slot[1]] ?? null
     if (slot[0] === '2') return qualifiers.second[slot[1]] ?? null
-    if (slot.startsWith('3r')) return qualifiers.bestThirds[+slot.slice(2)] ?? null
+    if (slot.startsWith('3_')) return qualifiers.thirdAssignment[slot.slice(2)] ?? null
     return null
   }
 
