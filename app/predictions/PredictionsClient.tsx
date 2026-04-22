@@ -4,11 +4,13 @@ import NavBar from '@/components/NavBar'
 import { Team, Group } from '@/lib/wc2026-data'
 
 interface Match { id: number; group_name: string; team1: string; team2: string; date: string; time: string; venue: string }
+interface KoMatch { id: number; phase: string; team1: string; team2: string; date: string; score1: number | null; score2: number | null; status: string }
 
 interface Props {
   userName: string
   locked: boolean
   matches: Match[]
+  koMatches: KoMatch[]
   groups: Group[]
   teams: Team[]
   knockoutRounds: { id: string; name: string; slots: number }[]
@@ -107,7 +109,7 @@ const ROUND_SIZES: Record<string, number> = { r32: 16, r16: 8, qf: 4, sf: 2, fin
 const ROUND_LABELS: Record<string, string> = { r32: 'Octavos de Final', r16: 'Cuartos de Final', qf: 'Semifinales', sf: 'Final + 3°', final: 'Gran Final' }
 const ROUND_PTS: Record<string, number> = { r32: 4, r16: 5, qf: 6, sf: 7, final: 10 }
 
-export default function PredictionsClient({ userName, locked, matches, groups, teams, initialPreds, initialBracket }: Props) {
+export default function PredictionsClient({ userName, locked, matches, koMatches, groups, teams, initialPreds, initialBracket }: Props) {
   const [tab, setTab] = useState<'matches' | 'groups' | 'bracket'>('matches')
   const [preds, setPreds] = useState(initialPreds)
   const [saving, setSaving] = useState<string | null>(null)
@@ -236,7 +238,6 @@ export default function PredictionsClient({ userName, locked, matches, groups, t
 
   async function pickBracket(round: string, matchIdx: number, team: string, other: string | null) {
     const newb = { ...bpicks, [`${round}_${matchIdx}`]: team }
-    // Cascade: remove the OTHER team from all subsequent rounds
     if (other) {
       const ri = ROUND_ORDER.indexOf(round as typeof ROUND_ORDER[number])
       ROUND_ORDER.slice(ri + 1).forEach(r => {
@@ -250,45 +251,120 @@ export default function PredictionsClient({ userName, locked, matches, groups, t
     flash(`b${round}`)
   }
 
-  // Render a bracket match card (as a function, not component, to avoid remount)
+  // Find an actual DB knockout match for this bracket slot (if admin has created it)
+  function findKoMatch(t1id: string | null, t2id: string | null): KoMatch | null {
+    if (!t1id || !t2id) return null
+    return koMatches.find(m =>
+      (m.team1 === t1id && m.team2 === t2id) || (m.team1 === t2id && m.team2 === t1id)
+    ) ?? null
+  }
+
+  // Render bracket match — with live score inputs if a DB match exists, else bracket picks
   const renderBracketMatch = (round: string, matchIdx: number, label?: string) => {
     const [t1id, t2id] = getMatchTeams(round, matchIdx)
     const t1 = t1id ? gt(teams, t1id) : null
     const t2 = t2id ? gt(teams, t2id) : null
     const picked = bpicks[`${round}_${matchIdx}`]
     const bothReady = !!t1id && !!t2id
+    const koMatch = findKoMatch(t1id, t2id)
 
+    // If there's a real KO match → show score prediction inputs
+    if (koMatch) {
+      const pred = preds[koMatch.id]
+      const finished = koMatch.status === 'finished'
+      const realWinner = finished && koMatch.score1 != null && koMatch.score2 != null
+        ? koMatch.score1 > koMatch.score2 ? koMatch.team1 : koMatch.team2 : null
+      const predWinner = pred && pred.s1 !== pred.s2 ? (pred.s1 > pred.s2 ? koMatch.team1 : koMatch.team2) : null
+
+      // Derive bracket pick from score prediction
+      if (!locked && predWinner && predWinner !== picked) {
+        const other = predWinner === t1id ? t2id : t1id
+        setTimeout(() => pickBracket(round, matchIdx, predWinner, other), 0)
+      }
+
+      return (
+        <div key={`${round}_${matchIdx}_ko`} className="space-y-1.5">
+          {label && <p className="text-xs text-gray-500 text-center">{label}</p>}
+          <div className={`rounded-xl border-2 overflow-hidden text-sm font-semibold ${
+            realWinner && predWinner === realWinner ? 'border-green-500' :
+            realWinner && predWinner && predWinner !== realWinner ? 'border-red-600' :
+            predWinner ? 'border-gold/70' : 'border-field-light'
+          }`} style={{ background: 'linear-gradient(145deg,#0d2815,#081508)' }}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-field-light/40">
+              <span className="text-xs text-gold font-bold">⚽ Predicción</span>
+              <span className="text-xs text-gold font-semibold">+{ROUND_PTS[round]}pts{!finished && ' +2 exacto'}</span>
+            </div>
+            {/* Teams with score inputs */}
+            {([{ teamObj: t1, teamId: t1id, scoreKey: 's1' as const, realScore: koMatch.score1 },
+               { teamObj: t2, teamId: t2id, scoreKey: 's2' as const, realScore: koMatch.score2 }] as const).map(({ teamObj, teamId, scoreKey, realScore }, idx) => {
+              const isWinner = realWinner === teamId
+              const isPredWinner = predWinner === teamId
+              return (
+                <div key={idx}>
+                  {idx === 1 && <div className="h-px bg-field-light/40" />}
+                  <div className={`flex items-center gap-2 px-3 py-2.5 ${
+                    isWinner ? 'bg-green-900/30' : isPredWinner && !finished ? 'bg-gold/10' : ''
+                  }`}>
+                    <span className="text-xl leading-none">{teamObj?.flag ?? '🏳️'}</span>
+                    <span className="flex-1 font-semibold text-sm">{teamObj?.name ?? 'Pendiente'}</span>
+                    {finished ? (
+                      <span className="font-black text-xl text-white w-6 text-center">{realScore}</span>
+                    ) : (
+                      <input type="number" min="0" max="20" disabled={locked || finished}
+                        value={pred?.[scoreKey] ?? ''} placeholder="0"
+                        onChange={e => {
+                          const v = +e.target.value
+                          setPreds(p => ({ ...p, [koMatch.id]: scoreKey === 's1'
+                            ? { s1: v, s2: p[koMatch.id]?.s2 ?? 0 }
+                            : { s1: p[koMatch.id]?.s1 ?? 0, s2: v } }))
+                        }}
+                        onBlur={() => { if (pred) saveMatch(koMatch.id, pred.s1, pred.s2) }}
+                        className="score-input w-12 text-lg" />
+                    )}
+                    {isWinner && <span className="text-green-400">✓</span>}
+                    {isPredWinner && !finished && <span className="text-gold text-xs">⭐</span>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+    }
+
+    // No DB match yet → show bracket pick buttons
     return (
-      <div key={`${round}_${matchIdx}`} className="space-y-1">
-        {label && <p className="text-xs text-gray-500 text-center mb-1">{label}</p>}
-        <div className={`rounded-lg border-2 overflow-hidden text-xs font-semibold ${picked ? 'border-gold/60' : 'border-field-light'}`}>
+      <div key={`${round}_${matchIdx}`} className="space-y-1.5">
+        {label && <p className="text-xs text-gray-500 text-center">{label}</p>}
+        <div className={`rounded-xl border-2 overflow-hidden text-xs font-semibold transition-all duration-200 ${
+          picked ? 'border-gold/60' : 'border-field-light/60'
+        }`} style={{ background: 'linear-gradient(145deg,#0d2815,#081508)' }}>
           {[{ teamObj: t1, teamId: t1id }, { teamObj: t2, teamId: t2id }].map(({ teamObj, teamId }, idx) => (
             <div key={idx}>
-              {idx === 1 && <div className="h-px bg-field-light" />}
+              {idx === 1 && <div className="h-px bg-field-light/40" />}
               <button
                 onClick={() => {
                   if (!locked && bothReady && teamId) {
-                    const other = teamId === t1id ? t2id : t1id
-                    pickBracket(round, matchIdx, teamId, other)
+                    pickBracket(round, matchIdx, teamId, teamId === t1id ? t2id : t1id)
                   }
                 }}
                 disabled={locked || !bothReady}
-                className={`w-full flex items-center gap-2 px-3 py-2 transition-colors ${
-                  picked === teamId ? 'bg-gold/20 text-white' :
-                  !teamId ? 'bg-field-dark text-gray-600' :
-                  'bg-field-dark text-gray-300 hover:bg-field-mid'
+                className={`w-full flex items-center gap-2 px-3 py-2.5 transition-all duration-150 ${
+                  picked === teamId ? 'bg-gold/15 text-white' :
+                  !teamId ? 'text-gray-600' : 'text-gray-300 hover:bg-field-mid/60'
                 } ${locked || !bothReady ? 'cursor-default' : 'cursor-pointer'}`}
               >
                 {teamObj ? (
                   <>
-                    <span className="text-base leading-none">{teamObj.flag}</span>
-                    <span className="flex-1 text-left truncate">{teamObj.name}</span>
+                    <span className="text-lg leading-none">{teamObj.flag}</span>
+                    <span className="flex-1 text-left truncate font-medium">{teamObj.name}</span>
                     {picked === teamId && <span className="text-gold">⭐</span>}
                   </>
                 ) : (
                   <>
-                    <span>🏳️</span>
-                    <span className="text-gray-600 italic">Pendiente</span>
+                    <span className="text-lg">🏳️</span>
+                    <span className="text-gray-600 italic text-xs">Pendiente</span>
                   </>
                 )}
               </button>
@@ -302,29 +378,40 @@ export default function PredictionsClient({ userName, locked, matches, groups, t
   return (
     <div className="min-h-screen">
       <NavBar userName={userName} />
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-black text-white">Mis Predicciones</h1>
-          {locked && <span className="bg-red-900 text-red-200 text-xs font-bold px-3 py-1 rounded-full">🔒 CERRADAS</span>}
-        </div>
 
-        <div className="flex gap-2 mb-6 bg-field-dark rounded-xl p-1">
-          {([['matches', '⚽ Partidos'], ['groups', '📊 Posiciones'], ['bracket', '🏆 Eliminatoria']] as const).map(([id, label]) => (
+      {/* Page header */}
+      <div className="border-b border-field-light/30" style={{ background: 'linear-gradient(180deg,#0a1f10,#050e08)' }}>
+        <div className="max-w-4xl mx-auto px-4 py-5 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-black text-white">Mis Predicciones</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Mundial 2026 · {groups.length} grupos · 48 partidos</p>
+          </div>
+          {locked && <span className="badge-red">🔒 CERRADAS</span>}
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        {/* Tabs */}
+        <div className="flex gap-1.5 mb-6 p-1.5 rounded-2xl" style={{ background: 'rgba(11,36,18,0.8)', border: '1px solid rgba(28,92,48,0.4)' }}>
+          {([['matches', '⚽', 'Partidos'], ['groups', '📊', 'Posiciones'], ['bracket', '🏆', 'Eliminatoria']] as const).map(([id, icon, label]) => (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-semibold transition-colors ${tab === id ? 'tab-active' : 'tab-inactive'}`}>
-              {label}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-sm font-semibold transition-all duration-150 flex items-center justify-center gap-1.5 ${tab === id ? 'tab-active' : 'tab-inactive'}`}>
+              <span>{icon}</span><span>{label}</span>
             </button>
           ))}
         </div>
 
         {/* MATCHES TAB */}
         {tab === 'matches' && (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {groups.map(g => {
               const gm = matches.filter(m => m.group_name === g.id)
               return (
                 <div key={g.id} className="card">
-                  <h3 className="font-bold text-gold mb-3">{g.name}</h3>
+                  <div className="flex items-center gap-2 mb-4">
+                    <h3 className="font-black text-gold text-base">{g.name}</h3>
+                    <div className="h-px flex-1 bg-field-light/30" />
+                  </div>
                   <div className="space-y-3">
                     {gm.map(match => {
                       const t1 = gt(teams, match.team1), t2 = gt(teams, match.team2)

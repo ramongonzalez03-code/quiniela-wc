@@ -16,6 +16,10 @@ export default async function PredictionsPage() {
     "SELECT * FROM matches WHERE phase = 'group' ORDER BY date, time"
   ).all() as Array<{ id: number; group_name: string; team1: string; team2: string; date: string; time: string; venue: string; score1: number | null; score2: number | null; status: string }>
 
+  const koMatches = db.prepare(
+    "SELECT * FROM matches WHERE phase != 'group' ORDER BY phase, id"
+  ).all() as Array<{ id: number; phase: string; team1: string; team2: string; date: string; score1: number | null; score2: number | null; status: string }>
+
   const existingPreds = db.prepare(
     'SELECT match_id, pred_score1, pred_score2 FROM predictions WHERE user_id = ?'
   ).all(session.id) as Array<{ match_id: number; pred_score1: number; pred_score2: number }>
@@ -33,6 +37,7 @@ export default async function PredictionsPage() {
       userName={session.name}
       locked={locked}
       matches={matches}
+      koMatches={koMatches}
       groups={GROUPS}
       teams={TEAMS}
       knockoutRounds={KNOCKOUT_ROUNDS}

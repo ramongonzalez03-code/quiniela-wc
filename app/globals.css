@@ -1,36 +1,108 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --bg: #061a0e;
-  --field: #0a3d1f;
+  --bg: #050e08;
+  --field: #0b2412;
   --gold: #f5c518;
 }
 
 body {
   background-color: var(--bg);
-  color: #f1f5f1;
-  font-family: system-ui, -apple-system, sans-serif;
+  background-image:
+    radial-gradient(ellipse at 20% 0%, rgba(11,36,18,0.6) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 100%, rgba(11,36,18,0.4) 0%, transparent 60%);
+  color: #edf5ef;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
 @layer components {
+  /* ── Buttons ── */
   .btn-gold {
-    @apply bg-gold text-field-dark font-bold px-6 py-3 rounded-lg hover:bg-gold-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply font-bold px-6 py-3 rounded-xl transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #f5c518 0%, #ffe55c 100%);
+    color: #050e08;
+    box-shadow: 0 4px 16px rgba(245,197,24,0.30);
   }
+  .btn-gold:not(:disabled):hover {
+    box-shadow: 0 6px 22px rgba(245,197,24,0.50);
+    transform: translateY(-1px);
+  }
+  .btn-gold:not(:disabled):active {
+    transform: translateY(0);
+  }
+
   .btn-outline {
-    @apply border border-gold text-gold font-semibold px-4 py-2 rounded-lg hover:bg-gold hover:text-field-dark transition-colors;
+    @apply border border-gold/60 text-gold font-semibold px-4 py-2 rounded-xl hover:bg-gold/10 transition-all duration-200;
   }
+
+  .btn-ghost {
+    @apply text-gray-400 hover:text-white font-medium px-3 py-2 rounded-lg hover:bg-field-mid/50 transition-all duration-200;
+  }
+
+  /* ── Cards ── */
   .card {
-    @apply bg-field rounded-xl border border-field-light p-4;
+    @apply rounded-2xl border p-5;
+    background: linear-gradient(145deg, #0d2815 0%, #081508 100%);
+    border-color: rgba(28, 92, 48, 0.5);
+    box-shadow: 0 4px 32px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
   }
+  .card-hover {
+    @apply card transition-all duration-200 hover:border-gold/40;
+  }
+  .card-hover:hover {
+    box-shadow: 0 4px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(245,197,24,0.2), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  /* ── Tabs ── */
   .tab-active {
-    @apply bg-gold text-field-dark font-bold;
+    @apply font-bold text-field-dark;
+    background: linear-gradient(135deg, #f5c518 0%, #ffe55c 100%);
+    box-shadow: 0 2px 12px rgba(245,197,24,0.30);
   }
   .tab-inactive {
-    @apply text-gray-400 hover:text-white hover:bg-field-mid;
+    @apply text-gray-400 hover:text-white hover:bg-field-mid/60 transition-all duration-150;
   }
+
+  /* ── Inputs ── */
   .score-input {
-    @apply w-14 text-center bg-field-dark border border-field-light rounded-lg py-2 text-xl font-bold text-white focus:border-gold focus:outline-none;
+    @apply w-14 text-center bg-field-dark/80 border rounded-xl py-2 text-xl font-black text-white focus:outline-none transition-all duration-150;
+    border-color: rgba(28, 92, 48, 0.6);
+  }
+  .score-input:focus {
+    border-color: #f5c518;
+    box-shadow: 0 0 0 3px rgba(245,197,24,0.15);
+  }
+
+  .text-input {
+    @apply bg-field-dark/80 border rounded-xl px-4 py-2.5 text-white focus:outline-none transition-all duration-150 w-full;
+    border-color: rgba(28, 92, 48, 0.6);
+  }
+  .text-input:focus {
+    border-color: #f5c518;
+    box-shadow: 0 0 0 3px rgba(245,197,24,0.12);
+  }
+
+  /* ── Badge / Pill ── */
+  .badge-gold {
+    @apply text-xs font-bold px-2.5 py-0.5 rounded-full;
+    background: rgba(245,197,24,0.15);
+    color: #f5c518;
+    border: 1px solid rgba(245,197,24,0.3);
+  }
+  .badge-green {
+    @apply text-xs font-bold px-2.5 py-0.5 rounded-full bg-green-900/40 text-green-300 border border-green-700/40;
+  }
+  .badge-red {
+    @apply text-xs font-bold px-2.5 py-0.5 rounded-full bg-red-900/40 text-red-300 border border-red-700/40;
+  }
+
+  /* ── Section header ── */
+  .section-title {
+    @apply text-lg font-bold text-white flex items-center gap-2;
   }
 }
