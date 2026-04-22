@@ -7,6 +7,7 @@ const links = [
   { href: '/predictions', label: 'Predicciones', icon: '✏️' },
   { href: '/ranking',     label: 'Ranking',       icon: '🏆' },
   { href: '/bracket',     label: 'Bracket',       icon: '🗂️' },
+  { href: '/info',        label: 'Reglas',        icon: 'ℹ️' },
 ]
 
 export default function NavBar({ userName }: { userName: string }) {
